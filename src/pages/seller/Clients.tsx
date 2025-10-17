@@ -1087,6 +1087,11 @@ export default function Clients() {
                     </span>
                   </div>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="secondary" className="gap-2" onClick={handleDownloadHistoryPDF}>
+                    <Download className="h-4 w-4" /> Baixar PDF
+                  </Button>
+                </div>
               </div>
             </DialogHeader>
 
