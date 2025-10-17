@@ -516,6 +516,108 @@ export default function Clients() {
     return labels[status] || status;
   };
 
+  const handleDownloadHistoryPDF = () => {
+    if (!selectedClientForHistory) {
+      toast.error('Selecione um cliente para exportar.');
+      return;
+    }
+
+    const dateFmt = (d: string) => format(new Date(d), "dd/MM/yyyy", { locale: ptBR });
+    const dateTimeFmt = (d: string) => format(new Date(d), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
+
+    const style = `
+      body { font-family: Inter, Arial, sans-serif; padding: 24px; color: #111827; }
+      h1 { font-size: 20px; margin: 0; }
+      h2 { font-size: 18px; margin: 8px 0 16px; }
+      .section { margin-top: 24px; }
+      .section-title { font-size: 16px; margin-bottom: 8px; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; vertical-align: top; }
+      th { background: #f9fafb; font-weight: 600; }
+      .meta { color: #6b7280; margin-top: 4px; }
+    `;
+
+    const makeTable = (title: string, headers: string[], rows: string[][]) => {
+      const thead = `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
+      const tbody = rows.length
+        ? rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')
+        : `<tr><td colspan="${headers.length}" style="text-align:center;color:#6b7280">Nenhum registro</td></tr>`;
+      return `
+        <div class="section">
+          <div class="section-title">${title}</div>
+          <table>
+            <thead>${thead}</thead>
+            <tbody>${tbody}</tbody>
+          </table>
+        </div>
+      `;
+    };
+
+    const currency = (v: number) =>
+      new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+
+    const sellerName = ((selectedClientForHistory as any)?.owner_user_id
+      ? (sellers.find((s) => s.id === (selectedClientForHistory as any).owner_user_id)?.name || selectedClientForHistory?.seller_name)
+      : selectedClientForHistory?.seller_name) || '-';
+
+    const visitsRows = clientHistory.visits.map(v => [
+      dateTimeFmt(v.scheduled_at),
+      getVisitStatusLabel(v.status),
+      v.objective || '-',
+      v.notes || '-',
+    ]);
+
+    const demoRows = clientHistory.demonstrations.map(d => [
+      dateFmt(d.date),
+      getDemoStatusLabel(d.status),
+      d.notes || '-',
+    ]);
+
+    const warrantyRows = clientHistory.warranties.map(s => [
+      dateFmt(s.date),
+      'Manutenção em garantia',
+      getDemoStatusLabel(s.status),
+      s.notes || '-',
+    ]);
+
+    const salesRows = clientHistory.sales.map(s => [
+      dateFmt(s.sold_at),
+      getSaleStatusLabel(s.status),
+      currency(s.gross_value),
+      currency(s.estimated_profit),
+    ]);
+
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Histórico - ${selectedClientForHistory.farm_name}</title>
+          <style>${style}</style>
+        </head>
+        <body>
+          <h1>Histórico do Cliente</h1>
+          <h2>${selectedClientForHistory.farm_name}</h2>
+          <div class="meta">Vendedor: ${sellerName}</div>
+          ${makeTable('Visitas', ['Data/Hora', 'Status', 'Objetivo', 'Notas'], visitsRows)}
+          ${makeTable('Demonstrações', ['Data', 'Status', 'Notas'], demoRows)}
+          ${makeTable('Garantias', ['Data', 'Tipo', 'Status', 'Notas'], warrantyRows)}
+          ${makeTable('Vendas', ['Data', 'Status', 'Valor Bruto', 'Lucro Estimado'], salesRows)}
+        </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=900,height=650');
+    if (!printWindow) {
+      toast.error('Falha ao abrir a janela de impressão.');
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
   if (loading) {
     return (
       <AppLayout>
