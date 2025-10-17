@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Search, MapPin, Leaf, Mail, Phone, MessageCircle, Calendar, Edit, Eye, User, DollarSign, Package } from 'lucide-react';
+import { Plus, Search, MapPin, Leaf, Mail, Phone, MessageCircle, Calendar, Edit, Eye, User, DollarSign, Package, ShieldCheck } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -69,10 +69,20 @@ interface Sale {
   estimated_profit: number;
 }
 
+// Serviços do cliente (usados para listar garantias)
+interface Service {
+  id: string;
+  date: string;
+  status: string;
+  service_type: 'maintenance' | 'revision' | 'spraying';
+  notes: string | null;
+}
+
 interface ClientHistory {
   visits: Visit[];
   demonstrations: Demonstration[];
   sales: Sale[];
+  warranties: Service[];
 }
 
 export default function Clients() {
@@ -90,7 +100,8 @@ export default function Clients() {
   const [clientHistory, setClientHistory] = useState<ClientHistory>({
     visits: [],
     demonstrations: [],
-    sales: []
+    sales: [],
+    warranties: []
   });
   const [loadingHistory, setLoadingHistory] = useState(false);
   
@@ -424,10 +435,24 @@ export default function Clients() {
 
       if (salesError) throw salesError;
 
+      // Fetch services and filter warranties (Garantia: Sim)
+      const { data: services, error: servicesError } = await supabase
+        .from('services')
+        .select('*')
+        .eq('client_id', client.id)
+        .order('date', { ascending: false });
+
+      if (servicesError) throw servicesError;
+
+      const warranties = (services || []).filter((s: any) => 
+        s.service_type === 'maintenance' && ((s.notes || '').includes('Garantia: Sim'))
+      );
+
       setClientHistory({
         visits: visits || [],
         demonstrations: demonstrations || [],
-        sales: sales || []
+        sales: sales || [],
+        warranties: warranties as Service[]
       });
     } catch (error: any) {
       console.error('Error fetching client history:', error);
@@ -1143,7 +1168,7 @@ export default function Clients() {
 
                 {/* History Tabs */}
                 <Tabs defaultValue="visits" className="w-full">
-                  <TabsList className="grid w-full grid-cols-3">
+                  <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="visits">
                       <Calendar className="h-4 w-4 mr-2" />
                       Visitas ({clientHistory.visits.length})
@@ -1151,6 +1176,10 @@ export default function Clients() {
                     <TabsTrigger value="demonstrations">
                       <Package className="h-4 w-4 mr-2" />
                       Demonstrações ({clientHistory.demonstrations.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="warranties">
+                      <ShieldCheck className="h-4 w-4 mr-2" />
+                      Garantias ({clientHistory.warranties.length})
                     </TabsTrigger>
                     <TabsTrigger value="sales">
                       <DollarSign className="h-4 w-4 mr-2" />
@@ -1222,6 +1251,39 @@ export default function Clients() {
                             {demo.notes && (
                               <div className="mt-3 p-3 bg-muted/50 rounded-md">
                                 <p className="text-sm">{demo.notes}</p>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      ))
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="warranties" className="space-y-4">
+                    {clientHistory.warranties.length === 0 ? (
+                      <Card>
+                        <CardContent className="py-8 text-center text-muted-foreground">
+                          Nenhuma garantia registrada
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      clientHistory.warranties.map((svc) => (
+                        <Card key={svc.id}>
+                          <CardContent className="pt-6">
+                            <div className="flex items-start justify-between mb-3">
+                              <div>
+                                <p className="font-medium">
+                                  {format(new Date(svc.date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                                </p>
+                                <p className="text-sm text-muted-foreground mt-1">Serviço: Manutenção em garantia</p>
+                              </div>
+                              <Badge className={getDemoStatusColor(svc.status)}>
+                                {getDemoStatusLabel(svc.status)}
+                              </Badge>
+                            </div>
+                            {svc.notes && (
+                              <div className="mt-3 p-3 bg-muted/50 rounded-md">
+                                <p className="text-sm whitespace-pre-line">{svc.notes}</p>
                               </div>
                             )}
                           </CardContent>
