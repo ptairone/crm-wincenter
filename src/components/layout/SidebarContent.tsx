@@ -17,6 +17,7 @@ import {
   Presentation,
   ShoppingCart,
   ShieldCheck,
+  CheckSquare,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -33,6 +34,7 @@ const sellerLinks = [
   { to: '/seller/sales', icon: ShoppingCart, label: 'Vendas' },
   { to: '/seller/commissions', icon: DollarSign, label: 'Comissões' },
   { to: '/seller/visits', icon: Calendar, label: 'Visitas' },
+  { to: '/tasks', icon: CheckSquare, label: 'Tarefas' },
   { to: '/seller/demonstrations', icon: Presentation, label: 'Demonstrações' },
   { to: '/seller/warranties', icon: ShieldCheck, label: 'Garantias' },
   { to: '/seller/reports', icon: Receipt, label: 'Relatórios' },
@@ -48,6 +50,7 @@ const adminLinks = [
   { to: '/admin/company-costs', icon: Receipt, label: 'Custos' },
   { to: '/admin/commission-rules', icon: Settings, label: 'Regras Comissão' },
   { to: '/admin/commissions', icon: DollarSign, label: 'Gestão Comissões' },
+  { to: '/tasks', icon: CheckSquare, label: 'Tarefas' },
   { to: '/admin/users-invites', icon: UserPlus, label: 'Convites' },
   { to: '/admin/site-settings', icon: Sparkles, label: 'Configurações' },
 ];
@@ -60,6 +63,8 @@ export function SidebarContent({ onNavigate }: SidebarContentProps) {
   const { signOut, userRole, userName } = useAuth();
   const { unreadCount } = useNotifications();
   const { settings } = useSiteSettings();
+
+  const roleLabel = userRole === 'technician' ? 'Técnico' : (userRole === 'admin' ? 'Admin' : 'Vendedor');
 
   const handleNavClick = () => {
     onNavigate?.();
@@ -114,7 +119,7 @@ export function SidebarContent({ onNavigate }: SidebarContentProps) {
 
           <div>
             <h3 className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              {userRole === 'technician' ? 'Técnico' : 'Vendedor'}
+              {roleLabel}
             </h3>
             <nav className="space-y-1">
               {sellerLinks.map((link) => (

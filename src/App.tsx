@@ -31,6 +31,7 @@ import SellerProducts from "./pages/seller/Products";
 import SellerReports from "./pages/seller/Reports";
 import NotFound from "./pages/NotFound";
 import Warranties from "./pages/seller/Warranties";
+import TasksPage from "./pages/Tasks";
 
 const queryClient = new QueryClient();
 
@@ -169,6 +170,16 @@ const App = () => (
               }
             />
             
+            {/* Shared Tasks Route */}
+            <Route
+              path="/tasks"
+              element={
+                <ProtectedRoute>
+                  <TasksPage />
+                </ProtectedRoute>
+              }
+            />
+            
             {/* Seller Routes */}
             <Route
               path="/seller/dashboard"
@@ -250,8 +261,7 @@ const App = () => (
                 </ProtectedRoute>
               }
             />
-            
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+
             <Route path="*" element={<NotFound />} />
             </Routes>
           </ThemeProvider>

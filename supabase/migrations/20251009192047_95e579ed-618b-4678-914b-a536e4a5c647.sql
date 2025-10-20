@@ -117,20 +117,50 @@ DECLARE
   v_seller_auth_id UUID;
   v_user_ids UUID[];
   v_user_id UUID;
+  v_client_city TEXT;
+  v_client_state TEXT;
+  v_types TEXT;
+  v_city TEXT;
+  v_message TEXT;
 BEGIN
   -- Buscar nome do cliente e vendedor
-  SELECT contact_name, seller_auth_id INTO v_client_name, v_seller_auth_id
+  SELECT contact_name, seller_auth_id, city, state INTO v_client_name, v_seller_auth_id, v_client_city, v_client_state
   FROM public.clients
   WHERE id = NEW.client_id;
-  
+
+  -- Montar mensagem detalhada
+  SELECT string_agg(initcap(t), ', ') INTO v_types FROM unnest(NEW.demo_types) t;
+  v_city := COALESCE(NULLIF(v_client_city, ''), NEW.weather_city);
+  v_message := format('Cliente: %s • Data e Hora: %s',
+    COALESCE(v_client_name, 'Cliente'),
+    to_char(NEW.date, 'DD/MM/YYYY HH24:MI')
+  );
+  IF v_types IS NOT NULL THEN
+    v_message := v_message || format(' • Tipo: %s', v_types);
+  END IF;
+  IF NEW.crop IS NOT NULL AND NEW.crop <> '' THEN
+    v_message := v_message || format(' • Cultura: %s', NEW.crop);
+  END IF;
+  IF v_city IS NOT NULL THEN
+    IF v_client_state IS NOT NULL AND v_client_state <> '' THEN
+      v_message := v_message || format(' • Cidade: %s, %s', v_city, v_client_state);
+    ELSE
+      v_message := v_message || format(' • Cidade: %s', v_city);
+    END IF;
+  END IF;
+  IF NEW.notes IS NOT NULL AND NEW.notes <> '' THEN
+    v_message := v_message || format(' • Obs.: %s', NEW.notes);
+  END IF;
++ IF NEW.hectares IS NOT NULL THEN
++   v_message := v_message || format(' • Hectares: %s ha', NEW.hectares);
++ END IF;
+
   -- Montar array de usuários a notificar
   v_user_ids := ARRAY[]::UUID[];
-  
   -- Adicionar vendedor do cliente
   IF v_seller_auth_id IS NOT NULL THEN
     v_user_ids := array_append(v_user_ids, v_seller_auth_id);
   END IF;
-  
   -- Adicionar usuários atribuídos
   IF NEW.assigned_users IS NOT NULL THEN
     FOREACH v_user_id IN ARRAY NEW.assigned_users LOOP
@@ -139,7 +169,7 @@ BEGIN
       END IF;
     END LOOP;
   END IF;
-  
+
   -- Criar notificação para cada usuário
   FOREACH v_user_id IN ARRAY v_user_ids LOOP
     INSERT INTO public.notifications (
@@ -152,14 +182,11 @@ BEGIN
       v_user_id,
       'info',
       'Nova Demonstração Agendada 📅',
-      format('Demonstração para %s agendada para %s',
-        COALESCE(v_client_name, 'Cliente'),
-        to_char(NEW.date, 'DD/MM/YYYY HH24:MI')
-      ),
+      v_message,
       'demonstration'
     );
   END LOOP;
-  
+
   RETURN NEW;
 END;
 $function$;

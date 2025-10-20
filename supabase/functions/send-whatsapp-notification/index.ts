@@ -14,12 +14,19 @@ interface NotificationData {
   message: string;
   category: string | null;
   created_at: string;
+  client_id?: string | null;
 }
 
 interface UserData {
   name: string;
   email: string;
   phone: string | null;
+}
+
+interface ClientData {
+  contact_name: string | null;
+  phone: string | null;
+  whatsapp: string | null;
 }
 
 Deno.serve(async (req) => {
@@ -60,25 +67,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Filtrar apenas categorias que devem ser enviadas para WhatsApp
-    const allowedCategories = [
-      'service_maintenance',
-      'service_revision',
-      'service_spraying',
-      'demonstration',
-      'sale',
-      'commission'
-    ];
-
-    if (!notification.category || !allowedCategories.includes(notification.category)) {
-      console.log('ℹ️ Categoria não permitida para WhatsApp:', notification.category);
-      return new Response(
-        JSON.stringify({ message: 'Categoria não requer envio para WhatsApp' }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log('✅ Categoria permitida:', notification.category);
+    // Enviar todas as notificações para o webhook (sem filtro por categoria)
+    console.log('✅ Enviando notificação para webhook. Categoria:', notification.category);
 
     // Buscar dados do usuário
     const { data: user, error: userError } = await supabase
@@ -97,6 +87,21 @@ Deno.serve(async (req) => {
 
     console.log('👤 Usuário encontrado:', user.name);
 
+    // Buscar dados do cliente, se houver vínculo na notificação
+    let client: ClientData | null = null;
+    if (notification.client_id) {
+      const { data: clientsData, error: clientError } = await supabase
+        .from('clients')
+        .select('contact_name, phone, whatsapp')
+        .eq('id', notification.client_id)
+        .limit(1);
+
+      if (clientError) {
+        console.warn('⚠️ Erro ao buscar cliente (não bloqueante):', clientError);
+      }
+      client = clientsData && clientsData.length > 0 ? (clientsData[0] as ClientData) : null;
+    }
+
     // Mapear categoria para label em português
     const categoryLabels: Record<string, string> = {
       'service_maintenance': '🔧 Manutenção',
@@ -104,10 +109,11 @@ Deno.serve(async (req) => {
       'service_spraying': '🚁 Pulverização',
       'demonstration': '📊 Demonstração',
       'sale': '💰 Venda',
-      'commission': '💵 Comissão'
+      'commission': '💵 Comissão',
+      'task': '📝 Tarefa'
     };
 
-    const categoryLabel = categoryLabels[notification.category] || notification.category;
+    const categoryLabel = categoryLabels[notification.category || ''] || (notification.category || 'Notificação');
 
     // Preparar payload para n8n
     const webhookUrl = Deno.env.get('N8N_WHATSAPP_WEBHOOK_URL');
@@ -120,19 +126,43 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Compor texto padrão, incluindo cliente se disponível
+    const clientName = client?.contact_name || null;
+    const clientPhoneRaw = client?.whatsapp || client?.phone || null;
+    const clientPhone = clientPhoneRaw ? clientPhoneRaw.replace(/\D/g, '') : null;
+
+    const composedMessageBase = `Notificação: ${categoryLabel}\nResponsável: ${user.name}`;
+    const composedMessage = clientName
+      ? `${composedMessageBase}\nCliente: ${clientName}\nMensagem: ${notification.message}`
+      : `${composedMessageBase}\nMensagem: ${notification.message}`;
+
     const payload = {
+      // Dados do usuário (responsável)
       userName: user.name,
       userEmail: user.email,
       userPhone: user.phone,
+      userLabel: 'Responsável',
+
+      // Dados do cliente (quando disponíveis)
+      clientId: notification.client_id || null,
+      clientName: clientName,
+      clientPhone: clientPhone,
+      clientWhatsapp: client?.whatsapp || null,
+      recipientPhone: clientPhone || user.phone || null,
+      recipientLabel: clientPhone ? 'Cliente' : 'Responsável',
+
+      // Metadados da notificação
       categoryLabel: categoryLabel,
       notificationTitle: notification.title,
-      notificationMessage: notification.message,
+      notificationMessage: composedMessage,
+      message: composedMessage,
       notificationKind: notification.kind,
       notificationId: notification.id,
-      timestamp: notification.created_at
+      timestamp: notification.created_at,
+      whatsAppText: composedMessage,
     };
 
-    console.log('📤 Enviando para n8n:', { userName: user.name, category: notification.category });
+    console.log('📤 Enviando para n8n:', { recipient: payload.recipientLabel, category: notification.category });
 
     // Enviar para n8n
     const n8nResponse = await fetch(webhookUrl, {

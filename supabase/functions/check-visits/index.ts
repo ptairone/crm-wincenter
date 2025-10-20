@@ -110,6 +110,22 @@ serve(async (req) => {
           console.error('Erro ao criar notificação para vendedor:', notifyError);
         } else {
           notificationsCreated++;
++         // Criar tarefa para o vendedor somente ao completar 30 dias
++         if (daysSinceLastVisit === 30) {
++           const { error: taskError } = await supabase.rpc('create_task', {
++             p_responsible_auth_id: info.sellerId,
++             p_type: 'schedule_visit',
++             p_client_id: clientId,
++             p_related_entity_id: null,
++             p_due_at: new Date().toISOString(),
++             p_priority: 'medium',
++             p_notes: `Agendar visita para ${info.clientName} (30 dias sem visita)`,
++             p_assigned_users: null,
++           });
++           if (taskError) {
++             console.error('Erro ao criar tarefa de agendar visita:', taskError);
++           }
++         }
         }
       }
 
@@ -129,6 +145,22 @@ serve(async (req) => {
             console.error('Erro ao criar notificação para admin:', notifyError);
           } else {
             notificationsCreated++;
++           // Criar tarefa de follow-up somente ao completar 90 dias
++           if (daysSinceLastVisit === 90) {
++             const { error: taskError } = await supabase.rpc('create_task', {
++               p_responsible_auth_id: admin.auth_user_id,
++               p_type: 'followup',
++               p_client_id: clientId,
++               p_related_entity_id: null,
++               p_due_at: new Date().toISOString(),
++               p_priority: 'high',
++               p_notes: `Cliente ${info.clientName} sem visita há 90 dias. Cobrar agendamento do vendedor.`,
++               p_assigned_users: null,
++             });
++             if (taskError) {
++               console.error('Erro ao criar tarefa de follow-up (90 dias):', taskError);
++             }
++           }
           }
         }
       }

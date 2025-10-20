@@ -56,27 +56,43 @@ serve(async (req) => {
     }
 
     let notificationsCreated = 0;
-    const outOfStock: string[] = [];
-    const lowStock: string[] = [];
+-    const outOfStock: string[] = [];
+-    const lowStock: string[] = [];
++    const outOfStockProducts: { id: string; name: string }[] = [];
++    const lowStockProducts: { id: string; name: string }[] = [];
 
     // 3. Verificar estoque de cada produto
-    for (const product of products || []) {
-      if (product.stock === 0) {
-        outOfStock.push(product.name);
-      } else if (product.stock <= product.low_stock_threshold) {
-        lowStock.push(product.name);
-      }
-    }
+-    for (const product of products || []) {
+-      if (product.stock === 0) {
+-        outOfStock.push(product.name);
+-      } else if (product.stock <= product.low_stock_threshold) {
+-        lowStock.push(product.name);
+-      }
+-    }
++    for (const product of products || []) {
++      if (product.stock === 0) {
++        outOfStockProducts.push({ id: product.id, name: product.name });
++      } else if (product.stock <= product.low_stock_threshold) {
++        lowStockProducts.push({ id: product.id, name: product.name });
++      }
++    }
 
-    console.log(`🚫 Produtos sem estoque: ${outOfStock.length}`);
-    console.log(`⚠️ Produtos com estoque baixo: ${lowStock.length}`);
+-    console.log(`🚫 Produtos sem estoque: ${outOfStock.length}`);
+-    console.log(`⚠️ Produtos com estoque baixo: ${lowStock.length}`);
++    console.log(`🚫 Produtos sem estoque: ${outOfStockProducts.length}`);
++    console.log(`⚠️ Produtos com estoque baixo: ${lowStockProducts.length}`);
 
     // 4. Criar notificações para produtos sem estoque
-    if (outOfStock.length > 0) {
-      for (const admin of admins) {
-        const message = outOfStock.length === 1
-          ? `Produto "${outOfStock[0]}" está SEM ESTOQUE!`
-          : `${outOfStock.length} produtos estão SEM ESTOQUE: ${outOfStock.slice(0, 3).join(', ')}${outOfStock.length > 3 ? '...' : ''}`;
+-    if (outOfStock.length > 0) {
++    if (outOfStockProducts.length > 0) {
+       for (const admin of admins) {
+-        const message = outOfStock.length === 1
+-          ? `Produto "${outOfStock[0]}" está SEM ESTOQUE!`
+-          : `${outOfStock.length} produtos estão SEM ESTOQUE: ${outOfStock.slice(0, 3).join(', ')}${outOfStock.length > 3 ? '...' : ''}`;
++        const names = outOfStockProducts.map(p => p.name);
++        const message = names.length === 1
++          ? `Produto "${names[0]}" está SEM ESTOQUE!`
++          : `${names.length} produtos estão SEM ESTOQUE: ${names.slice(0, 3).join(', ')}${names.length > 3 ? '...' : ''}`;
 
         const { error: notifyError } = await supabase.rpc('create_notification', {
           p_user_auth_id: admin.auth_user_id,
@@ -90,15 +106,37 @@ serve(async (req) => {
         } else {
           notificationsCreated++;
         }
-      }
-    }
++
++        // Criar tarefas de reposição para cada produto crítico
++        for (const p of outOfStockProducts) {
++          const { error: taskError } = await supabase.rpc('create_task', {
++            p_responsible_auth_id: admin.auth_user_id,
++            p_type: 'stock_replenish',
++            p_client_id: null,
++            p_related_entity_id: p.id,
++            p_due_at: new Date().toISOString(),
++            p_priority: 'high',
++            p_notes: `Reposição necessária para produto "${p.name}" (sem estoque)`,
++            p_assigned_users: null,
++          });
++          if (taskError) {
++            console.error('Erro ao criar tarefa (sem estoque):', taskError);
++          }
++        }
+       }
+     }
 
     // 5. Criar notificações para produtos com estoque baixo
-    if (lowStock.length > 0) {
-      for (const admin of admins) {
-        const message = lowStock.length === 1
-          ? `Produto "${lowStock[0]}" está com estoque baixo!`
-          : `${lowStock.length} produtos com estoque baixo: ${lowStock.slice(0, 3).join(', ')}${lowStock.length > 3 ? '...' : ''}`;
+-    if (lowStock.length > 0) {
++    if (lowStockProducts.length > 0) {
+       for (const admin of admins) {
+-        const message = lowStock.length === 1
+-          ? `Produto "${lowStock[0]}" está com estoque baixo!`
+-          : `${lowStock.length} produtos com estoque baixo: ${lowStock.slice(0, 3).join(', ')}${lowStock.length > 3 ? '...' : ''}`;
++        const names = lowStockProducts.map(p => p.name);
++        const message = names.length === 1
++          ? `Produto "${names[0]}" está com estoque baixo!`
++          : `${names.length} produtos com estoque baixo: ${names.slice(0, 3).join(', ')}${names.length > 3 ? '...' : ''}`;
 
         const { error: notifyError } = await supabase.rpc('create_notification', {
           p_user_auth_id: admin.auth_user_id,
@@ -112,8 +150,25 @@ serve(async (req) => {
         } else {
           notificationsCreated++;
         }
-      }
-    }
++
++        // Criar tarefas de reposição para cada produto com estoque baixo
++        for (const p of lowStockProducts) {
++          const { error: taskError } = await supabase.rpc('create_task', {
++            p_responsible_auth_id: admin.auth_user_id,
++            p_type: 'stock_replenish',
++            p_client_id: null,
++            p_related_entity_id: p.id,
++            p_due_at: new Date().toISOString(),
++            p_priority: 'medium',
++            p_notes: `Repor estoque do produto "${p.name}" (estoque baixo)`,
++            p_assigned_users: null,
++          });
++          if (taskError) {
++            console.error('Erro ao criar tarefa (estoque baixo):', taskError);
++          }
++        }
+       }
+     }
 
     console.log(`✅ Verificação concluída. ${notificationsCreated} notificações criadas.`);
 

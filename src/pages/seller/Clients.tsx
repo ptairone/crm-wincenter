@@ -597,7 +597,7 @@ export default function Clients() {
         <body>
           <h1>Histórico do Cliente</h1>
           <h2>${selectedClientForHistory.farm_name}</h2>
-          <div class="meta">Vendedor: ${sellerName}</div>
+          <div class="meta">Responsável: ${sellerName}</div>
           ${makeTable('Visitas', ['Data/Hora', 'Status', 'Objetivo', 'Notas'], visitsRows)}
           ${makeTable('Demonstrações', ['Data', 'Status', 'Notas'], demoRows)}
           ${makeTable('Garantias', ['Data', 'Tipo', 'Status', 'Notas'], warrantyRows)}
