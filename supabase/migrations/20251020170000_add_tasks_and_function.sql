@@ -51,6 +51,7 @@ CREATE POLICY tasks_select ON public.tasks
     (client_id IN (SELECT c.id FROM public.clients c WHERE c.seller_auth_id = auth.uid()))
   );
 
+
 DROP POLICY IF EXISTS tasks_insert ON public.tasks;
 CREATE POLICY tasks_insert ON public.tasks
   FOR INSERT

@@ -30,10 +30,10 @@ import Demonstrations from "./pages/seller/Demonstrations";
 import SellerProducts from "./pages/seller/Products";
 import SellerReports from "./pages/seller/Reports";
 import NotFound from "./pages/NotFound";
-import Warranties from "./pages/seller/Warranties";
-import TasksPage from "./pages/Tasks";
-
-const queryClient = new QueryClient();
+ import Warranties from "./pages/seller/Warranties";
+ import ServiceOrders from "./pages/seller/ServiceOrders";
+ import TasksPage from "./pages/Tasks";
+ const queryClient = new QueryClient();
 
 function ThemeProvider({ children }: { children: React.ReactNode }) {
   const { loading } = useSiteSettings();
@@ -261,6 +261,15 @@ const App = () => (
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/seller/service-orders"
+              element={
+                <ProtectedRoute>
+                  <ServiceOrders />
+                </ProtectedRoute>
+              }
+            />
+
 
             <Route path="*" element={<NotFound />} />
             </Routes>

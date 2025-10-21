@@ -1,8 +1,20 @@
 -- Create enum for service types
-CREATE TYPE service_type AS ENUM ('maintenance', 'revision', 'spraying');
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'service_type') THEN
+    EXECUTE 'CREATE TYPE service_type AS ENUM (''maintenance'', ''revision'', ''spraying'')';
+  END IF;
+END
+$$;
 
 -- Create enum for service status
-CREATE TYPE service_status AS ENUM ('scheduled', 'completed', 'cancelled');
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'service_status') THEN
+    EXECUTE 'CREATE TYPE service_status AS ENUM (''scheduled'', ''completed'', ''cancelled'')';
+  END IF;
+END
+$$;
 
 -- Create services table
 CREATE TABLE public.services (

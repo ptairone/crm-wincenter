@@ -1,11 +1,27 @@
 -- Create auth user and link to existing user record
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 DO $$
 DECLARE
   v_user_id uuid := 'be5e9429-fe02-4bad-8191-88a78122eead';
   v_email text := 'alexrepresentantesc@gmail.com';
   v_password text := 'Fragafraga23#';
   v_auth_user_id uuid;
+  v_has_gen_salt boolean := EXISTS (
+    SELECT 1 FROM pg_proc WHERE proname = 'gen_salt'
+  );
 BEGIN
+  -- Skip if gen_salt() is not available
+  IF NOT v_has_gen_salt THEN
+    RAISE NOTICE 'Skipping admin user seed: gen_salt() not available';
+    RETURN;
+  END IF;
+
+  -- Skip if user already exists
+  IF EXISTS (SELECT 1 FROM auth.users u WHERE u.email = v_email) THEN
+    RAISE NOTICE 'Admin user already exists, skipping seed';
+    RETURN;
+  END IF;
+
   -- Create user in auth.users using Supabase's internal function
   INSERT INTO auth.users (
     instance_id,
@@ -31,7 +47,7 @@ BEGIN
     'authenticated',
     'authenticated',
     v_email,
-    crypt(v_password, gen_salt('bf')),
+    crypt(v_password, gen_salt('bf'::text)),
     NOW(),
     NOW(),
     NOW(),

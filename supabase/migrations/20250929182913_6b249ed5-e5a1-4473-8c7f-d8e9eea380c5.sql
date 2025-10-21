@@ -3,6 +3,7 @@ DROP POLICY IF EXISTS "products_read_all" ON public.products;
 
 -- Create new policy: only authenticated users can read products
 -- This protects sensitive pricing and cost data from competitors
+DROP POLICY IF EXISTS "products_read_authenticated" ON public.products;
 CREATE POLICY "products_read_authenticated"
 ON public.products
 FOR SELECT

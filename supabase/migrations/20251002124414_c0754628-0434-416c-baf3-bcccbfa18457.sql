@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS public.product_price_history (
 ALTER TABLE public.product_price_history ENABLE ROW LEVEL SECURITY;
 
 -- Política para admins poderem ver e inserir histórico
+DROP POLICY IF EXISTS "price_history_admin_all" ON public.product_price_history;
 CREATE POLICY "price_history_admin_all"
 ON public.product_price_history
 FOR ALL
@@ -32,6 +33,7 @@ USING (is_admin())
 WITH CHECK (is_admin());
 
 -- Política para usuários autenticados verem histórico
+DROP POLICY IF EXISTS "price_history_read_authenticated" ON public.product_price_history;
 CREATE POLICY "price_history_read_authenticated"
 ON public.product_price_history
 FOR SELECT

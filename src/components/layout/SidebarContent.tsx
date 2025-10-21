@@ -18,6 +18,7 @@ import {
   ShoppingCart,
   ShieldCheck,
   CheckSquare,
+  FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -34,6 +35,7 @@ const sellerLinks = [
   { to: '/seller/sales', icon: ShoppingCart, label: 'Vendas' },
   { to: '/seller/commissions', icon: DollarSign, label: 'Comissões' },
   { to: '/seller/visits', icon: Calendar, label: 'Visitas' },
+  { to: '/seller/service-orders', icon: FileText, label: 'Ordens de Serviço' },
   { to: '/tasks', icon: CheckSquare, label: 'Tarefas' },
   { to: '/seller/demonstrations', icon: Presentation, label: 'Demonstrações' },
   { to: '/seller/warranties', icon: ShieldCheck, label: 'Garantias' },

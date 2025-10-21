@@ -1,4 +1,5 @@
 -- Adicionar política para permitir vendedores criarem demonstrações
+DROP POLICY IF EXISTS "demo_seller_insert" ON demonstrations;
 CREATE POLICY "demo_seller_insert" 
 ON demonstrations 
 FOR INSERT 
@@ -12,6 +13,7 @@ WITH CHECK (
 );
 
 -- Adicionar política para permitir vendedores atualizarem suas demonstrações
+DROP POLICY IF EXISTS "demo_seller_update" ON demonstrations;
 CREATE POLICY "demo_seller_update" 
 ON demonstrations 
 FOR UPDATE 
@@ -33,6 +35,7 @@ WITH CHECK (
 );
 
 -- Adicionar política para permitir vendedores deletarem suas demonstrações
+DROP POLICY IF EXISTS "demo_seller_delete" ON demonstrations;
 CREATE POLICY "demo_seller_delete" 
 ON demonstrations 
 FOR DELETE 

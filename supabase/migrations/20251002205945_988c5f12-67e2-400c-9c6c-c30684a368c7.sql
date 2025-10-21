@@ -13,10 +13,21 @@ ADD COLUMN IF NOT EXISTS demo_types text[] DEFAULT ARRAY[]::text[],
 ADD COLUMN IF NOT EXISTS crop text,
 ADD COLUMN IF NOT EXISTS hectares numeric;
 
--- Migrate existing assigned_user to assigned_users array
-UPDATE public.demonstrations
-SET assigned_users = ARRAY[assigned_user]
-WHERE assigned_user IS NOT NULL AND assigned_users = ARRAY[]::uuid[];
+-- Migrate existing assigned_user to assigned_users array (only if column exists)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public'
+      AND table_name = 'demonstrations'
+      AND column_name = 'assigned_user'
+  ) THEN
+    UPDATE public.demonstrations
+    SET assigned_users = ARRAY[assigned_user]::uuid[]
+    WHERE assigned_user IS NOT NULL
+      AND (assigned_users IS NULL OR assigned_users = ARRAY[]::uuid[]);
+  END IF;
+END $$;
 
 -- Now drop the old assigned_user column
 ALTER TABLE public.demonstrations

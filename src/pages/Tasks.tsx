@@ -162,157 +162,34 @@ export default function TasksPage() {
     enabled: !!user,
   });
 
-  // Utilitário: criar notificações para uma lista de usuários
-  async function notifyUsers(
-    supabase: any,
-    userIds: string[],
-    kind: 'info' | 'success',
-    title: string,
-    message: string,
-    category: string = 'task'
-  ) {
-    const unique = Array.from(new Set(userIds.filter(Boolean)));
-    for (const uid of unique) {
-      const { data, error } = await supabase.rpc('create_notification', {
-        p_user_auth_id: uid,
-        p_kind: kind,
-        p_title: title,
-        p_message: message,
-        p_category: category,
-      });
-      if (error) {
-        // fallback para insert direto caso RPC não esteja disponível
-        await supabase.from('notifications').insert({
-          user_auth_id: uid,
-          kind,
-          title,
-          message,
-          category,
-        });
-      }
-    }
-  }
-
-  const updateMutation = useMutation({
-    mutationFn: async ({ task, status }: { task: any; status: "in_progress" | "completed" | "cancelled" }) => {
-      const { error } = await supabase
-        .from("tasks" as any)
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq("id", task.id);
-      if (error) {
-        const msg = (error.message || '').toLowerCase();
-        if (msg.includes('duplicate')) {
-          console.warn('Regra de duplicidade ativada; tratando como sucesso.', error.message);
-          return { task, status };
-        }
-        throw error;
-      }
-      return { task, status };
-    },
-    onSuccess: async (_data, variables) => {
-      toast.success("Tarefa atualizada");
-      // Notificar responsáveis apenas na conclusão
-      if (variables.status === "completed") {
-        const t = variables.task;
-        const recipients = Array.from(new Set([
-          ...(Array.isArray(t.assigned_users) ? t.assigned_users : []),
-          t.responsible_auth_id,
-        ].filter(Boolean)));
-        const clientLabel = t.clients?.farm_name || t.clients?.contact_name || "Cliente";
-        const title = "Tarefa Concluída ✅";
-        const message = `${typeLabel(t.type)} para ${clientLabel} concluída.`;
-        try {
-          await notifyUsers(supabase, recipients, "success", title, message, "task");
-        } catch (err) {
-          console.error("Falha ao notificar conclusão de tarefa:", err);
-        }
-      }
-      refetch();
-    },
-    onError: (err: any) => {
-      const msg = (err?.message || '').toLowerCase();
-      if (msg.includes('duplicate')) {
-        toast.success('Tarefa atualizada (duplicidade ignorada)');
-        refetch();
-        return;
-      }
-      toast.error(err.message || "Falha ao atualizar tarefa");
-    }
-  });
-
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!user) throw new Error("Not authenticated");
-      if (!newType || !newDueAt) throw new Error("Preencha tipo e data/hora");
-
-      const dueIso = new Date(newDueAt).toISOString();
-
-      // Montar lista final de atribuídos garantindo inclusão do responsável e do usuário atual
-      const finalAssigned = Array.from(new Set([
-        ...newAssignedUsers,
-        ...(newResponsibleId ? [newResponsibleId] : []),
-        user.id,
-      ])).filter(Boolean) as string[];
-
-      const payload: any = {
-        p_responsible_auth_id: newResponsibleId || user.id,
-        p_type: newType,
-        p_client_id: newClientId || null,
-        p_related_entity_id: null,
-        p_due_at: dueIso,
-        p_priority: newPriority,
-        p_notes: newNotes || null,
-        p_assigned_users: finalAssigned.length ? finalAssigned : [user.id],
+      const insert: any = {
+        client_id: newClientId || null,
+        type: newType,
+        due_at: newDueAt ? new Date(newDueAt).toISOString() : null,
+        priority: newPriority,
+        notes: newNotes || null,
+        responsible_auth_id: newResponsibleId || user?.id,
+        assigned_users: newAssignedUsers.length ? newAssignedUsers : (user?.id ? [user.id] : []),
+        created_at: new Date().toISOString(),
       };
-
-      // Tentar RPC; se a função não existir, fazer fallback para INSERT direto
-      const { data, error } = await supabase.rpc("create_task", payload);
-      if (!error) return { finalAssigned };
-
-      // Tratar duplicidade como sucesso silencioso
-      const msgDup = (error?.message || '').toLowerCase();
-      if (msgDup.includes('duplicate')) {
-        toast.info('Tarefa semelhante já existente; mantendo atual.');
-        return { finalAssigned };
+      const { error } = await supabase
+        .from("tasks" as any)
+        .insert(insert);
+      if (error) {
+        const msg = (error.message || '').toLowerCase();
+        if (msg.includes('duplicate')) {
+          console.warn('Duplicidade ao criar; tratando como sucesso.', error.message);
+          return insert;
+        }
+        throw error;
       }
-
-      const missingFn = typeof error?.message === 'string' && (error.message.includes('Could not find the function public.create_task') || error.message.includes('function create_task'));
-      if (missingFn) {
-        const { data: inserted, error: insertErr } = await supabase
-          .from("tasks" as any)
-          .insert({
-            responsible_auth_id: newResponsibleId || user.id,
-            type: newType,
-            client_id: newClientId || null,
-            related_entity_id: null,
-            due_at: dueIso,
-            priority: newPriority,
-            notes: newNotes || null,
-            assigned_users: finalAssigned,
-            status: 'pending',
-          })
-          .select('id')
-          .single();
-        if (insertErr) throw insertErr;
-        toast.info('Função create_task ausente; tarefa criada diretamente');
-        return { finalAssigned };
-      }
-
-      throw error;
+      return insert;
     },
-    onSuccess: async (res: { finalAssigned: string[] }) => {
+    onSuccess: async () => {
       toast.success("Tarefa criada");
-
-      // Notificar responsáveis na criação
-      try {
-        const due = new Date(newDueAt).toLocaleString('pt-BR');
-        const title = 'Nova Tarefa 📝';
-        const message = `${typeLabel(newType)}${newClientId ? ' para Cliente' : ''} com vencimento em ${due}.`;
-        await notifyUsers(supabase, res.finalAssigned, 'info', title, message, 'task');
-      } catch (err) {
-        console.error('Falha ao notificar criação de tarefa:', err);
-      }
-
       setCreateOpen(false);
       // reset
       setNewClientId("");
@@ -381,6 +258,24 @@ export default function TasksPage() {
     setEditAssignedUsers(user?.id ? [user.id] : []);
   };
 
+  const updateMutation = useMutation({
+    mutationFn: async ({ task, status }: { task: any; status: "pending" | "in_progress" | "completed" | "cancelled" }) => {
+      const { error } = await supabase
+        .from("tasks" as any)
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq("id", task.id);
+      if (error) throw error;
+      return { status };
+    },
+    onSuccess: () => {
+      toast.success("Status atualizado");
+      refetch();
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Falha ao atualizar status");
+    },
+  });
+
   const saveEditMutation = useMutation({
     mutationFn: async () => {
       if (!editTask) throw new Error("Nenhuma tarefa para editar");
@@ -410,20 +305,7 @@ export default function TasksPage() {
     },
     onSuccess: async () => {
       toast.success("Tarefa editada");
-      // Notificar responsáveis/atribuídos sobre a edição
-      try {
-        const recipients = Array.from(new Set([
-          ...((editAssignedUsers || []) as string[]),
-          editResponsibleId,
-          user?.id,
-        ].filter(Boolean)));
-        const dueText = editDueAt ? new Date(editDueAt).toLocaleString('pt-BR') : 'sem data definida';
-        const title = 'Tarefa Atualizada ✏️';
-        const message = `${typeLabel(editType)} atualizado; vencimento ${dueText}.`;
-        await notifyUsers(supabase, recipients, 'info', title, message, 'task');
-      } catch (err) {
-        console.error('Falha ao notificar edição de tarefa:', err);
-      }
+      // Notificação automática desativada.
       closeEdit();
       refetch();
     },

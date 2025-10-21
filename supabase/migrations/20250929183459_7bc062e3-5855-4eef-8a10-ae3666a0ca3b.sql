@@ -7,6 +7,7 @@
 DROP POLICY IF EXISTS "users_update_self_or_admin" ON public.users;
 
 -- Create separate policies for admins and self-updates
+DROP POLICY IF EXISTS "users_update_admin_all" ON public.users;
 CREATE POLICY "users_update_admin_all"
 ON public.users
 FOR UPDATE
@@ -15,6 +16,7 @@ USING (is_admin())
 WITH CHECK (is_admin());
 
 -- Users can only update safe fields (not role, status, auth_user_id)
+DROP POLICY IF EXISTS "users_update_self_safe_fields" ON public.users;
 CREATE POLICY "users_update_self_safe_fields"
 ON public.users
 FOR UPDATE
@@ -34,6 +36,7 @@ WITH CHECK (
 DROP POLICY IF EXISTS "commission_rules_read" ON public.commission_rules;
 
 -- Only admins can read all commission rules
+DROP POLICY IF EXISTS "commission_rules_read_admin" ON public.commission_rules;
 CREATE POLICY "commission_rules_read_admin"
 ON public.commission_rules
 FOR SELECT

@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Users, TrendingUp, Package, Bell, ShieldCheck } from 'lucide-react';
+import { Home, Users, TrendingUp, Package, Bell, ShieldCheck, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNotifications } from '@/hooks/useNotifications';
 
@@ -9,6 +9,7 @@ const sellerLinks = [
   { to: '/seller/opportunities', icon: TrendingUp, label: 'Funil' },
   { to: '/seller/sales', icon: Package, label: 'Vendas' },
   { to: '/seller/warranties', icon: ShieldCheck, label: 'Garantias' },
+  { to: '/seller/service-orders', icon: FileText, label: 'O.S' },
   { to: '/seller/reports', icon: Package, label: 'Relatórios' },
   { to: '/notifications', icon: Bell, label: 'Notificações' },
 ];

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Search, MapPin, Leaf, Mail, Phone, MessageCircle, Calendar, Edit, Eye, User, DollarSign, Package, ShieldCheck, Download } from 'lucide-react';
+import { Plus, Search, MapPin, Leaf, Mail, Phone, MessageCircle, Calendar, Edit, Eye, User, DollarSign, Package, ShieldCheck, Download, Radio, Loader2 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -88,6 +88,7 @@ interface ClientHistory {
 export default function Clients() {
   const { user, userRole } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -104,6 +105,18 @@ export default function Clients() {
     warranties: []
   });
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  const [historyDroneInfo, setHistoryDroneInfo] = useState<{
+    name: string | null;
+    login: string | null;
+    controller_serial: string | null;
+    drone_serial: string | null;
+    controller_version: string | null;
+    drone_version: string | null;
+    purchase_date: string | null;
+  } | null>(null);
+  const [showDroneInfo, setShowDroneInfo] = useState(false);
   
   const [sellers, setSellers] = useState<Seller[]>([]);
   
@@ -130,12 +143,39 @@ export default function Clients() {
     notes: '',
   });
 
+  // Drone sync fields for purchased products (Cadastro do Cliente)
+  const [droneSyncEnabled, setDroneSyncEnabled] = useState(false);
+  const [droneInfo, setDroneInfo] = useState({
+    name: '',
+    login: '',
+    password: '',
+    controller_serial: '',
+    drone_serial: '',
+    controller_version: '',
+    drone_version: '',
+    purchase_date: '',
+    created_at: new Date().toISOString(),
+  });
+
   useEffect(() => {
     fetchClients();
     if (userRole === 'admin') {
       fetchSellers();
     }
   }, [user, userRole]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('clients:search');
+      if (saved) setSearchTerm(saved);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('clients:search', searchTerm);
+    } catch {}
+  }, [searchTerm]);
 
   const fetchClients = async () => {
     try {
@@ -260,11 +300,23 @@ export default function Clients() {
       location_link: '',
       owner_user_id: '',
     });
+    setDroneSyncEnabled(false);
+    setDroneInfo({
+      name: '',
+      login: '',
+      password: '',
+      controller_serial: '',
+      drone_serial: '',
+      controller_version: '',
+      drone_version: '',
+      purchase_date: '',
+      created_at: new Date().toISOString(),
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    setIsSaving(true);
     try {
       const clientData: any = {
         farm_name: formData.farm_name,
@@ -284,11 +336,47 @@ export default function Clients() {
         ...(userRole === 'admin' ? { owner_user_id: formData.owner_user_id || null } : {}),
       };
 
-      const { error } = await supabase
+      const { data: insertedClient, error: insertError } = await supabase
         .from('clients')
-        .insert([clientData]);
+        .insert([clientData])
+        .select()
+        .single();
 
-      if (error) throw error;
+      if (insertError) throw insertError;
+
+      if (droneSyncEnabled && insertedClient?.id) {
+        const hasSomeInfo = Object.values({
+          name: droneInfo.name,
+          login: droneInfo.login,
+          password: droneInfo.password,
+          controller_serial: droneInfo.controller_serial,
+          drone_serial: droneInfo.drone_serial,
+          controller_version: droneInfo.controller_version,
+          drone_version: droneInfo.drone_version,
+          purchase_date: droneInfo.purchase_date,
+        }).some(v => (v ?? '').toString().trim() !== '');
+
+        if (hasSomeInfo) {
+          try {
+            await supabase
+              .from('client_drone_info')
+              .upsert({
+                client_id: insertedClient.id,
+                name: droneInfo.name || null,
+                login: droneInfo.login || null,
+                password: droneInfo.password || null,
+                controller_serial: droneInfo.controller_serial || null,
+                drone_serial: droneInfo.drone_serial || null,
+                controller_version: droneInfo.controller_version || null,
+                drone_version: droneInfo.drone_version || null,
+                purchase_date: droneInfo.purchase_date || null,
+                created_at: droneInfo.created_at || new Date().toISOString(),
+              }, { onConflict: 'client_id' });
+          } catch (persistErr) {
+            console.warn('Falha ao salvar informações de Drone, verifique schema:', persistErr);
+          }
+        }
+      }
 
       toast.success('Cliente criado com sucesso!');
       setDialogOpen(false);
@@ -297,6 +385,8 @@ export default function Clients() {
     } catch (error: any) {
       console.error('Error creating client:', error);
       toast.error('Erro ao criar cliente: ' + error.message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -318,12 +408,55 @@ export default function Clients() {
       location_link: client.location_link || '',
       owner_user_id: (client as any).owner_user_id || '',
     });
+
+    // Reset Dispositivos e carregar dados do drone (se existirem)
+    setDroneSyncEnabled(false);
+    setDroneInfo({
+      name: '',
+      login: '',
+      password: '',
+      controller_serial: '',
+      drone_serial: '',
+      controller_version: '',
+      drone_version: '',
+      purchase_date: '',
+      created_at: new Date().toISOString(),
+    });
+
+    (async () => {
+      try {
+        const { data: row, error } = await supabase
+          .from('client_drone_info')
+          .select('name, login, password, controller_serial, drone_serial, controller_version, drone_version, purchase_date, created_at')
+          .eq('client_id', client.id)
+          .maybeSingle();
+
+        if (!error && row) {
+          setDroneSyncEnabled(true);
+          setDroneInfo({
+            name: row.name ?? '',
+            login: row.login ?? '',
+            password: row.password ?? '',
+            controller_serial: row.controller_serial ?? '',
+            drone_serial: row.drone_serial ?? '',
+            controller_version: row.controller_version ?? '',
+            drone_version: row.drone_version ?? '',
+            purchase_date: (row as any).purchase_date ?? '',
+            created_at: row.created_at ?? new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.warn('Falha ao carregar informações de Drone:', err);
+      }
+    })();
+
     setEditDialogOpen(true);
   };
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingClient) return;
+    setIsSaving(true);
 
     try {
       const clientData: any = {
@@ -350,6 +483,51 @@ export default function Clients() {
 
       if (error) throw error;
 
+      // Persistência das informações do drone
+      if (droneSyncEnabled) {
+        const hasSomeInfo = Object.values({
+          name: droneInfo.name,
+          login: droneInfo.login,
+          password: droneInfo.password,
+          controller_serial: droneInfo.controller_serial,
+          drone_serial: droneInfo.drone_serial,
+          controller_version: droneInfo.controller_version,
+          drone_version: droneInfo.drone_version,
+          purchase_date: droneInfo.purchase_date,
+        }).some(v => (v ?? '').toString().trim() !== '');
+
+        if (hasSomeInfo) {
+          try {
+            await supabase
+              .from('client_drone_info')
+              .upsert({
+                client_id: editingClient.id,
+                name: droneInfo.name || null,
+                login: droneInfo.login || null,
+                password: droneInfo.password || null,
+                controller_serial: droneInfo.controller_serial || null,
+                drone_serial: droneInfo.drone_serial || null,
+                controller_version: droneInfo.controller_version || null,
+                drone_version: droneInfo.drone_version || null,
+                purchase_date: droneInfo.purchase_date || null,
+                created_at: droneInfo.created_at || new Date().toISOString(),
+              }, { onConflict: 'client_id' });
+          } catch (persistErr) {
+            console.warn('Falha ao salvar informações de Drone, verifique schema:', persistErr);
+          }
+        }
+      } else if (editingClient?.id) {
+        // Se desmarcar sincronização, remover registro existente
+        try {
+          await supabase
+            .from('client_drone_info')
+            .delete()
+            .eq('client_id', editingClient.id);
+        } catch (persistErr) {
+          console.warn('Falha ao excluir informações de Drone, verifique schema:', persistErr);
+        }
+      }
+
       toast.success('Cliente atualizado com sucesso!');
       setEditDialogOpen(false);
       setEditingClient(null);
@@ -358,6 +536,8 @@ export default function Clients() {
     } catch (error: any) {
       console.error('Error updating client:', error);
       toast.error('Erro ao atualizar cliente: ' + error.message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -406,52 +586,70 @@ export default function Clients() {
     setSelectedClientForHistory(client);
     setHistoryDialogOpen(true);
     setLoadingHistory(true);
+    setHistoryDroneInfo(null);
+    setShowDroneInfo(false);
 
     try {
-      // Fetch visits
-      const { data: visits, error: visitsError } = await supabase
-        .from('visits')
-        .select('*')
-        .eq('client_id', client.id)
-        .order('scheduled_at', { ascending: false });
+      // Carregar tudo em paralelo
+      const [visitsRes, demosRes, salesRes, servicesRes, droneRes] = await Promise.all([
+        supabase
+          .from('visits')
+          .select('*')
+          .eq('client_id', client.id)
+          .order('scheduled_at', { ascending: false }),
+        supabase
+          .from('demonstrations')
+          .select('*')
+          .eq('client_id', client.id)
+          .order('date', { ascending: false }),
+        supabase
+          .from('sales')
+          .select('*')
+          .eq('client_id', client.id)
+          .order('sold_at', { ascending: false }),
+        supabase
+          .from('services')
+          .select('*')
+          .eq('client_id', client.id)
+          .order('date', { ascending: false }),
+        supabase
+          .from('client_drone_info')
+          .select('name, login, controller_serial, drone_serial, controller_version, drone_version, purchase_date')
+          .eq('client_id', client.id)
+          .maybeSingle(),
+      ]);
 
-      if (visitsError) throw visitsError;
+      if (visitsRes.error) throw visitsRes.error;
+      if (demosRes.error) throw demosRes.error;
+      if (salesRes.error) throw salesRes.error;
+      if (servicesRes.error) throw servicesRes.error;
 
-      // Fetch demonstrations
-      const { data: demonstrations, error: demosError } = await supabase
-        .from('demonstrations')
-        .select('*')
-        .eq('client_id', client.id)
-        .order('date', { ascending: false });
-
-      if (demosError) throw demosError;
-
-      // Fetch sales
-      const { data: sales, error: salesError } = await supabase
-        .from('sales')
-        .select('*')
-        .eq('client_id', client.id)
-        .order('sold_at', { ascending: false });
-
-      if (salesError) throw salesError;
-
-      // Fetch services and filter warranties (Garantia: Sim)
-      const { data: services, error: servicesError } = await supabase
-        .from('services')
-        .select('*')
-        .eq('client_id', client.id)
-        .order('date', { ascending: false });
-
-      if (servicesError) throw servicesError;
-
-      const warranties = (services || []).filter((s: any) => 
+      const services = servicesRes.data || [];
+      const warranties = (services || []).filter((s: any) =>
         s.service_type === 'maintenance' && ((s.notes || '').includes('Garantia: Sim'))
       );
 
+      const row = (droneRes as any).data;
+      if (row) {
+        setHistoryDroneInfo({
+          name: row.name,
+          login: row.login,
+          controller_serial: row.controller_serial,
+          drone_serial: row.drone_serial,
+          controller_version: row.controller_version,
+          drone_version: row.drone_version,
+          purchase_date: (row as any).purchase_date,
+        });
+        setShowDroneInfo(true);
+      } else {
+        setHistoryDroneInfo(null);
+        setShowDroneInfo(false);
+      }
+
       setClientHistory({
-        visits: visits || [],
-        demonstrations: demonstrations || [],
-        sales: sales || [],
+        visits: visitsRes.data || [],
+        demonstrations: demosRes.data || [],
+        sales: salesRes.data || [],
         warranties: warranties as Service[]
       });
     } catch (error: any) {
@@ -675,6 +873,7 @@ export default function Clients() {
                       />
                     </div>
                   </div>
+
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="email">Email</Label>
@@ -694,6 +893,7 @@ export default function Clients() {
                       />
                     </div>
                   </div>
+
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="whatsapp">WhatsApp</Label>
@@ -708,28 +908,39 @@ export default function Clients() {
                       <Input
                         id="hectares"
                         type="number"
+                        step="0.01"
                         value={formData.hectares}
                         onChange={(e) => setFormData({ ...formData, hectares: e.target.value })}
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-4">
+
+                  <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="city">Cidade *</Label>
+                      <Label htmlFor="city">Cidade</Label>
                       <Input
                         id="city"
                         value={formData.city}
                         onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                        required
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="state">Estado *</Label>
+                      <Label htmlFor="state">Estado</Label>
                       <Input
                         id="state"
                         value={formData.state}
                         onChange={(e) => setFormData({ ...formData, state: e.target.value })}
-                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="address">Endereço</Label>
+                      <Input
+                        id="address"
+                        value={formData.address}
+                        onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                       />
                     </div>
                     <div className="space-y-2">
@@ -741,72 +952,186 @@ export default function Clients() {
                       />
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="address">Endereço</Label>
-                    <Input
-                      id="address"
-                      value={formData.address}
-                      onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    />
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="crops">Cultura(s)</Label>
+                      <Input
+                        id="crops"
+                        placeholder="Ex.: soja, milho"
+                        value={formData.crops}
+                        onChange={(e) => setFormData({ ...formData, crops: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="location_link">Link de Localização</Label>
+                      <Input
+                        id="location_link"
+                        type="url"
+                        placeholder="https://maps.google.com/..."
+                        value={formData.location_link}
+                        onChange={(e) => setFormData({ ...formData, location_link: e.target.value })}
+                      />
+                    </div>
                   </div>
+
                   <div className="space-y-2">
-                    <Label htmlFor="location_link">Link da Localização</Label>
-                    <Input
-                      id="location_link"
-                      placeholder="https://maps.google.com/..."
-                      value={formData.location_link}
-                      onChange={(e) => setFormData({ ...formData, location_link: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="relationship_status">Status *</Label>
+                    <Label>Status de Relacionamento</Label>
                     <Select
                       value={formData.relationship_status}
                       onValueChange={(value) => setFormData({ ...formData, relationship_status: value })}
                     >
-                      <SelectTrigger>
-                        <SelectValue />
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Selecione o status" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="lead">Lead</SelectItem>
-                        <SelectItem value="prospect">Prospecto</SelectItem>
+                        <SelectItem value="prospect">Prospect</SelectItem>
                         <SelectItem value="customer">Cliente</SelectItem>
                         <SelectItem value="inactive">Inativo</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="crops">Culturas (separadas por vírgula)</Label>
-                    <Input
-                      id="crops"
-                      value={formData.crops}
-                      onChange={(e) => setFormData({ ...formData, crops: e.target.value })}
-                      placeholder="Ex: Soja, Milho, Algodão"
-                    />
-                  </div>
-                  {userRole === 'admin' && (
+
+                  {userRole === "admin" && (
                     <div className="space-y-2">
-                      <Label htmlFor="owner_user_id">Responsável (opcional)</Label>
+                      <Label>Responsável (Vendedor)</Label>
                       <Select
-                        value={formData.owner_user_id}
+                        value={formData.owner_user_id || undefined}
                         onValueChange={(value) => setFormData({ ...formData, owner_user_id: value })}
                       >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione um vendedor" />
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Selecione o responsável" />
                         </SelectTrigger>
                         <SelectContent>
                           {sellers.map((seller) => (
-                            <SelectItem key={seller.auth_user_id} value={seller.auth_user_id}>
-                              {seller.name}
+                            <SelectItem key={seller.id} value={seller.id}>
+                              {seller.name || seller.email}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
                   )}
-                  <Button type="submit" className="w-full">
-                    Criar Cliente
-                  </Button>
+
+                  {/* Dispositivos */}
+                  <div className="space-y-3 border rounded-md p-4">
+                    <div className="flex items-center justify-between">
+                      <Label>Dispositivos</Label>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="droneSync"
+                          checked={droneSyncEnabled}
+                          disabled={isSaving}
+                          onCheckedChange={(checked) => {
+                            const next = !!checked;
+                            if (!next && droneSyncEnabled) {
+                              const hasTypedInfo = Object.values({
+                                name: droneInfo.name,
+                                login: droneInfo.login,
+                                password: droneInfo.password,
+                                controller_serial: droneInfo.controller_serial,
+                                drone_serial: droneInfo.drone_serial,
+                                controller_version: droneInfo.controller_version,
+                                drone_version: droneInfo.drone_version,
+                                purchase_date: droneInfo.purchase_date,
+                              }).some(v => (v ?? '').toString().trim() !== '');
+                              const msg = hasTypedInfo
+                                ? 'Desativar sincronização descartará os dados preenchidos do Drone. Deseja continuar?'
+                                : 'Desativar sincronização do Drone?';
+                              if (!window.confirm(msg)) return;
+                            }
+                            setDroneSyncEnabled(next);
+                          }}
+                        />
+                        <Label htmlFor="droneSync">Sincronizar Drone Agrícola</Label>
+                      </div>
+                    </div>
+                    <p className="text-sm text-muted-foreground">Somente o dispositivo Drone Agrícola possui sincronização.</p>
+
+                    {droneSyncEnabled && (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>👤 Nome</Label>
+                          <Input
+                            value={droneInfo.name}
+                            onChange={(e) => setDroneInfo({ ...droneInfo, name: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>🔑 Login</Label>
+                          <Input
+                            value={droneInfo.login}
+                            onChange={(e) => setDroneInfo({ ...droneInfo, login: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>🔐 Senha</Label>
+                          <Input
+                            type="password"
+                            value={droneInfo.password}
+                            onChange={(e) => setDroneInfo({ ...droneInfo, password: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>🎮 Nº Série Controle</Label>
+                          <Input
+                            value={droneInfo.controller_serial}
+                            onChange={(e) => setDroneInfo({ ...droneInfo, controller_serial: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>🚁 Nº Série Drone</Label>
+                          <Input
+                            value={droneInfo.drone_serial}
+                            onChange={(e) => setDroneInfo({ ...droneInfo, drone_serial: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>📡 Versão Controle</Label>
+                          <Input
+                            value={droneInfo.controller_version}
+                            onChange={(e) => setDroneInfo({ ...droneInfo, controller_version: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>🛠️ Versão Drone</Label>
+                          <Input
+                            value={droneInfo.drone_version}
+                            onChange={(e) => setDroneInfo({ ...droneInfo, drone_version: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>🗓️ Data da Compra</Label>
+                          <Input
+                            type="date"
+                            value={droneInfo.purchase_date}
+                            onChange={(e) => setDroneInfo({ ...droneInfo, purchase_date: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>⏰ Criado em</Label>
+                          <Input
+                            value={new Date(droneInfo.created_at).toLocaleString('pt-BR')}
+                            disabled
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <Button type="submit" disabled={isSaving}>
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Salvando...
+                        </>
+                      ) : (
+                        'Salvar'
+                      )}
+                    </Button>
+                  </div>
                 </form>
               </DialogContent>
             </Dialog>
@@ -1119,8 +1444,122 @@ export default function Clients() {
                   </Select>
                 </div>
               )}
-              <Button type="submit" className="w-full">
-                Salvar Alterações
+
+              {/* Dispositivos */}
+              <div className="space-y-3 border rounded-md p-4">
+                <div className="flex items-center justify-between">
+                  <Label>Dispositivos</Label>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="droneSyncEdit"
+                      checked={droneSyncEnabled}
+                      disabled={isSaving}
+                      onCheckedChange={(checked) => {
+                        const next = !!checked;
+                        if (!next && droneSyncEnabled) {
+                          const hasTypedInfo = Object.values({
+                            name: droneInfo.name,
+                            login: droneInfo.login,
+                            password: droneInfo.password,
+                            controller_serial: droneInfo.controller_serial,
+                            drone_serial: droneInfo.drone_serial,
+                            controller_version: droneInfo.controller_version,
+                            drone_version: droneInfo.drone_version,
+                            purchase_date: droneInfo.purchase_date,
+                          }).some(v => (v ?? '').toString().trim() !== '');
+                          const msg = hasTypedInfo
+                            ? 'Desativar sincronização removerá os dados do Drone ao salvar. Deseja continuar?'
+                            : 'Desativar sincronização do Drone?';
+                          if (!window.confirm(msg)) return;
+                        }
+                        setDroneSyncEnabled(next);
+                      }}
+                    />
+                    <Label htmlFor="droneSyncEdit">Sincronizar Drone Agrícola</Label>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">Somente o dispositivo Drone Agrícola possui sincronização.</p>
+
+                {droneSyncEnabled && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>👤 Nome</Label>
+                      <Input
+                        value={droneInfo.name}
+                        onChange={(e) => setDroneInfo({ ...droneInfo, name: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>🔑 Login</Label>
+                      <Input
+                        value={droneInfo.login}
+                        onChange={(e) => setDroneInfo({ ...droneInfo, login: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>🔐 Senha</Label>
+                      <Input
+                        type="password"
+                        value={droneInfo.password}
+                        onChange={(e) => setDroneInfo({ ...droneInfo, password: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>🎮 Nº Série Controle</Label>
+                      <Input
+                        value={droneInfo.controller_serial}
+                        onChange={(e) => setDroneInfo({ ...droneInfo, controller_serial: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>🚁 Nº Série Drone</Label>
+                      <Input
+                        value={droneInfo.drone_serial}
+                        onChange={(e) => setDroneInfo({ ...droneInfo, drone_serial: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>📡 Versão Controle</Label>
+                      <Input
+                        value={droneInfo.controller_version}
+                        onChange={(e) => setDroneInfo({ ...droneInfo, controller_version: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>🛠️ Versão Drone</Label>
+                      <Input
+                        value={droneInfo.drone_version}
+                        onChange={(e) => setDroneInfo({ ...droneInfo, drone_version: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>🗓️ Data da Compra</Label>
+                      <Input
+                        type="date"
+                        value={droneInfo.purchase_date}
+                        onChange={(e) => setDroneInfo({ ...droneInfo, purchase_date: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>⏰ Criado em</Label>
+                      <Input
+                        value={new Date(droneInfo.created_at).toLocaleString('pt-BR')}
+                        disabled
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <Button type="submit" className="w-full" disabled={isSaving}>
+                {isSaving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Salvando...
+                  </>
+                ) : (
+                  'Salvar Alterações'
+                )}
               </Button>
             </form>
           </DialogContent>
@@ -1190,6 +1629,14 @@ export default function Clients() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant={showDroneInfo ? "default" : "outline"}
+                    className="gap-2"
+                    onClick={() => setShowDroneInfo((prev) => !prev)}
+                    title="Mostrar/ocultar dispositivo"
+                  >
+                    <Radio className="h-4 w-4" /> Dispositivo
+                  </Button>
                   <Button variant="secondary" className="gap-2" onClick={handleDownloadHistoryPDF}>
                     <Download className="h-4 w-4" /> Baixar PDF
                   </Button>
@@ -1272,6 +1719,53 @@ export default function Clients() {
                     )}
                   </CardContent>
                 </Card>
+
+                {showDroneInfo && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Dispositivo Drone</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {!historyDroneInfo && (
+                        <p className="text-sm text-muted-foreground">Sem dispositivo cadastrado — exibindo placeholders.</p>
+                      )}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">Nome do Dispositivo</p>
+                          <p className="text-sm">{historyDroneInfo?.name || '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">Login</p>
+                          <p className="text-sm">{historyDroneInfo?.login || '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">Serial do Controle</p>
+                          <p className="text-sm">{historyDroneInfo?.controller_serial || '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">Serial do Drone</p>
+                          <p className="text-sm">{historyDroneInfo?.drone_serial || '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">Versão do Controle</p>
+                          <p className="text-sm">{historyDroneInfo?.controller_version || '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">Versão do Drone</p>
+                          <p className="text-sm">{historyDroneInfo?.drone_version || '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">Data de Compra</p>
+                          <p className="text-sm">
+                            {historyDroneInfo?.purchase_date
+                              ? format(new Date(historyDroneInfo?.purchase_date as string), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })
+                              : '—'}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* History Tabs */}
                 <Tabs defaultValue="visits" className="w-full">
